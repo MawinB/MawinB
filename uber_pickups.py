@@ -3,21 +3,15 @@ import pandas as pd
 import kagglehub
 import os
 import pycountry
+from kaggle.api.kaggle_api_extended import KaggleApi
 
-# -----------------------------
-# 1️⃣ ดาวน์โหลด dataset จาก Kaggle
-# -----------------------------
-path = kagglehub.dataset_download("starbucks/store-locations")
-print("Path to dataset files:", path)
+api = KaggleApi()
+api.authenticate()
 
-# ค้นหาไฟล์ CSV ในโฟลเดอร์
-for file in os.listdir(path):
-    if file.endswith(".csv"):
-        data_path = os.path.join(path, file)
-        break
-
-# โหลดข้อมูลด้วย pandas
-df = pd.read_csv(data_path)
+dataset = "starbucks/store-locations"
+download_path = "data/"
+api.dataset_download_files(dataset, path=download_path, unzip=True)
+df = pd.read_csv(os.path.join(download_path, "starbucks_locations.csv"))
 
 # -----------------------------
 # 2️⃣ ตั้งค่า Streamlit Page
@@ -103,3 +97,4 @@ if len(filtered_df) > 0:
     st.dataframe(filtered_df[columns_to_show].reset_index(drop=True))
 else:
     st.warning("ไม่มีข้อมูลสาขาตามฟิลเตอร์ที่เลือก")
+
