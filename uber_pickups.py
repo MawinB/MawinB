@@ -1,37 +1,105 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import kagglehub
+import os
+import pycountry
 
-st.title('Uber pickups in NYC')
+# -----------------------------
+# 1️⃣ ดาวน์โหลด dataset จาก Kaggle
+# -----------------------------
+path = kagglehub.dataset_download("starbucks/store-locations")
+print("Path to dataset files:", path)
 
-DATE_COLUMN = 'date/time'
-DATA_URL = ('https://s3-us-west-2.amazonaws.com/'
-         'streamlit-demo-data/uber-raw-data-sep14.csv.gz')
+# ค้นหาไฟล์ CSV ในโฟลเดอร์
+for file in os.listdir(path):
+    if file.endswith(".csv"):
+        data_path = os.path.join(path, file)
+        break
 
-@st.cache_data
-def load_data(nrows):
-    data = pd.read_csv(DATA_URL, nrows=nrows)
-    lowercase = lambda x: str(x).lower()
-    data.rename(lowercase, axis='columns', inplace=True)
-    data[DATE_COLUMN] = pd.to_datetime(data[DATE_COLUMN])
-    return data
+# โหลดข้อมูลด้วย pandas
+df = pd.read_csv(data_path)
 
-# Create a text element and let the reader know the data is loading.
-data_load_state = st.text('Loading data...')
-# Load 10,000 rows of data into the dataframe.
-data = load_data(10000)
-# Notify the reader that the data was successfully loaded.
-data_load_state.text("Done! (using st.cache_data)")
+# -----------------------------
+# 2️⃣ ตั้งค่า Streamlit Page
+# -----------------------------
+st.set_page_config(page_title="Starbucks Store Dashboard", layout="wide")
+st.title("☕ Starbucks Store Locations Dashboard")
 
-st.subheader('Raw data')
-st.write(data)
+st.write(f"จำนวนข้อมูลทั้งหมด: **{len(df)} สาขา**")
+st.write("เลือกประเทศและเมืองเพื่อดูตำแหน่งสาขา Starbucks บนแผนที่ 🌍")
 
-st.subheader('Number of pickups by hour')
-hist_values = np.histogram(
-    data[DATE_COLUMN].dt.hour, bins=24, range=(0,24))[0]
-st.bar_chart(hist_values)
+# -----------------------------
+# 3️⃣ แปลงรหัสประเทศเป็นชื่อเต็ม
+# -----------------------------
+def get_country_name(code):
+    try:
+        return pycountry.countries.get(alpha_2=code).name
+    except:
+        return code
 
-hour_to_filter = st.slider('hour', 0, 23, 17)  # min: 0h, max: 23h, default: 17h
-filtered_data = data[data[DATE_COLUMN].dt.hour == hour_to_filter]
-st.subheader(f'Map of all pickups at {hour_to_filter}:00')
-st.map(filtered_data)
+if "Country" in df.columns:
+    df["Country Name"] = df["Country"].apply(get_country_name)
+else:
+    st.error("ไม่พบคอลัมน์ 'Country' ใน dataset")
+
+# -----------------------------
+# 4️⃣ ฟิลเตอร์ Country และ City
+# -----------------------------
+st.subheader("🗺️ แผนที่แสดงตำแหน่งร้าน Starbucks")
+
+# Country dropdown พร้อมตัวเลือก "ทั้งหมด"
+country_options = sorted(df["Country Name"].dropna().unique())
+country_options = ["ทั้งหมด"] + country_options
+country = st.selectbox("เลือกประเทศ (Country)", country_options)
+
+# กรองข้อมูลตาม Country
+filtered_df = df.copy()
+if country != "ทั้งหมด":
+    filtered_df = filtered_df[df["Country Name"] == country]
+
+# City dropdown พร้อมตัวเลือก "ทั้งหมด"
+city_options = sorted(filtered_df["City"].dropna().unique())
+city = st.selectbox("เลือกเมือง (City)", ["ทั้งหมด"] + city_options)
+if city != "ทั้งหมด":
+    filtered_df = filtered_df[filtered_df["City"] == city]
+
+st.write(f"พบทั้งหมด **{len(filtered_df)} สาขา** ใน {country}{' - ' + city if city != 'ทั้งหมด' else ''}")
+
+# -----------------------------
+# 5️⃣ Search box สำหรับชื่อสาขา
+# -----------------------------
+search_name = st.text_input("ค้นหาชื่อสาขา")
+if search_name:
+    filtered_df = filtered_df[filtered_df["Store Name"].str.contains(search_name, case=False, na=False)]
+    st.write(f"พบ **{len(filtered_df)} สาขา** ตามคำค้น '{search_name}'")
+
+# -----------------------------
+# 6️⃣ แสดงแผนที่
+# -----------------------------
+if {"Latitude", "Longitude"}.issubset(filtered_df.columns):
+    # ลบแถวที่ไม่มีค่าพิกัด
+    map_df = filtered_df.dropna(subset=["Latitude", "Longitude"])
+
+    st.write(f"จำนวนสาขาที่มีพิกัดจริง: **{len(map_df)} สาขา**")
+
+    if len(map_df) == 0:
+        st.warning("ไม่มีข้อมูลพิกัดสำหรับประเทศ/เมืองที่เลือก")
+    else:
+        st.map(map_df.rename(columns={"Latitude": "lat", "Longitude": "lon"}))
+else:
+    st.warning("ไม่พบข้อมูลพิกัด (Latitude/Longitude) ใน dataset")
+
+# -----------------------------
+# 7️⃣ แสดงตารางข้อมูลเพิ่มเติม
+# -----------------------------
+st.subheader("📋 รายละเอียดสาขา Starbucks ตามฟิลเตอร์")
+
+columns_to_show = ["Store Name", "Phone Number", "Street Address", "City", "Country Name"]
+
+# ตรวจสอบว่าคอลัมน์มีอยู่จริง
+columns_to_show = [col for col in columns_to_show if col in filtered_df.columns]
+
+if len(filtered_df) > 0:
+    st.dataframe(filtered_df[columns_to_show].reset_index(drop=True))
+else:
+    st.warning("ไม่มีข้อมูลสาขาตามฟิลเตอร์ที่เลือก")
